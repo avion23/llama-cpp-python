@@ -661,10 +661,9 @@ class Llama:
         """Reset the model state."""
         self.n_tokens = 0
 
-        if self._is_recurrent:
-            mem = llama_cpp.llama_get_memory(self._ctx.ctx)
-            if mem is not None:
-                llama_cpp.llama_memory_clear(mem, True)
+        mem = llama_cpp.llama_get_memory(self._ctx.ctx)
+        if mem is not None:
+            llama_cpp.llama_memory_clear(mem, True)
 
     def eval(self, tokens: Sequence[int]):
         """Evaluate a list of tokens.
