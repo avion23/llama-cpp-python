@@ -182,9 +182,12 @@ class LlamaModel:
         return list(tokens[:n_tokens])
 
     def token_to_piece(self, token: int, special: bool = False) -> bytes:
-        buf = ctypes.create_string_buffer(32)
-        llama_cpp.llama_token_to_piece(self.vocab, token, buf, 32, 0, special)
-        return bytes(buf)
+        size = 32
+        buffer = (ctypes.c_char * size)()
+        n = llama_cpp.llama_token_to_piece(
+            self.vocab, llama_cpp.llama_token(token), buffer, size, 0, special
+        )
+        return bytes(buffer[:n])
 
     def detokenize(self, tokens: List[int], special: bool = False) -> bytes:
         output = b""

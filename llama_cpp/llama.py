@@ -1373,6 +1373,7 @@ class Llama:
 
         finish_reason = "length"
         multibyte_fix = 0
+        accumulated_text = b""
         for token in self.generate(
             prompt_tokens,
             top_k=top_k,
@@ -1392,16 +1393,17 @@ class Llama:
             grammar=grammar,
         ):
             if llama_cpp.llama_vocab_is_eog(self._model.vocab, token):
-                text = self.detokenize(completion_tokens, prev_tokens=prompt_tokens)
+                text = accumulated_text
                 finish_reason = "stop"
                 break
 
             completion_tokens.append(token)
 
-            all_text = self.detokenize(completion_tokens, prev_tokens=prompt_tokens)
+            new_text = self._model.token_to_piece(token)
+            accumulated_text += new_text
 
             # Contains multi-byte UTF8
-            for k, char in enumerate(all_text[-3:]):
+            for k, char in enumerate(accumulated_text[-3:]):
                 k = 3 - k
                 for num, pattern in [(2, 192), (3, 224), (4, 240)]:
                     # Bitwise AND check
@@ -1413,19 +1415,16 @@ class Llama:
                 multibyte_fix -= 1
                 continue
 
-            any_stop = [s for s in stop_sequences if s in all_text]
+            any_stop = [s for s in stop_sequences if s in accumulated_text]
             if len(any_stop) > 0:
                 first_stop = any_stop[0]
-                text = all_text[: all_text.index(first_stop)]
+                text = accumulated_text[: accumulated_text.index(first_stop)]
                 finish_reason = "stop"
                 break
 
             if stream:
                 remaining_tokens = completion_tokens[returned_tokens:]
-                remaining_text = self.detokenize(
-                    remaining_tokens,
-                    prev_tokens=prompt_tokens + completion_tokens[:returned_tokens],
-                )
+                remaining_text = self._model.token_to_piece(token)
                 remaining_length = len(remaining_text)
 
                 # We want to avoid yielding any characters from
@@ -1562,14 +1561,14 @@ class Llama:
                         }
 
             if len(completion_tokens) >= max_tokens:
-                text = self.detokenize(completion_tokens, prev_tokens=prompt_tokens)
+                text = accumulated_text
                 finish_reason = "length"
                 break
 
         if stopping_criteria is not None and stopping_criteria(
             self._input_ids, self._scores[-1, :]
         ):
-            text = self.detokenize(completion_tokens, prev_tokens=prompt_tokens)
+            text = accumulated_text
             finish_reason = "stop"
 
         if self.verbose:
@@ -1577,9 +1576,8 @@ class Llama:
 
         if stream:
             remaining_tokens = completion_tokens[returned_tokens:]
-            remaining_text = self.detokenize(
-                remaining_tokens,
-                prev_tokens=prompt_tokens + completion_tokens[:returned_tokens],
+            remaining_text = b"".join(
+                self._model.token_to_piece(t) for t in remaining_tokens
             )
             any_stop = [s for s in stop_sequences if s in remaining_text]
             if len(any_stop) > 0:
@@ -1589,12 +1587,8 @@ class Llama:
 
             token_end_position = 0
             for token in remaining_tokens:
-                token_end_position += len(
-                    self.detokenize(
-                        [token],
-                        prev_tokens=prompt_tokens + completion_tokens[:returned_tokens],
-                    )
-                )
+                token_piece = self._model.token_to_piece(token)
+                token_end_position += len(token_piece)
 
                 logprobs_or_none: Optional[CompletionLogprobs] = None
                 if logprobs is not None:
@@ -1634,7 +1628,7 @@ class Llama:
                     }
 
                 if token_end_position >= end:
-                    last_text = self.detokenize([token])
+                    last_text = token_piece
                     if token_end_position == end - 1:
                         break
                     returned_tokens += 1
