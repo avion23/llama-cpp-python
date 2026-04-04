@@ -672,7 +672,8 @@ class Llama:
         Args:
             tokens: The list of tokens to evaluate.
         """
-        self._ctx.kv_cache_seq_rm(-1, self.n_tokens, -1)
+        if len(tokens) < self.n_tokens:
+            self._ctx.kv_cache_seq_rm(-1, len(tokens), -1)
         for i in range(0, len(tokens), self.n_batch):
             batch = tokens[i : min(len(tokens), i + self.n_batch)]
             n_past = self.n_tokens
