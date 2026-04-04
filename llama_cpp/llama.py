@@ -1721,7 +1721,6 @@ class Llama:
                 for i, token in enumerate(all_tokens)
             ]
             all_logprobs = Llama.logits_to_logprobs(self._scores)[token_offset:]
-            # TODO: may be able to change this loop to use np.take_along_dim
             for idx, (token, token_str, logprobs_token) in enumerate(
                 zip(all_tokens, all_token_strs, all_logprobs)
             ):
@@ -1736,17 +1735,16 @@ class Llama:
                     )
                 )
                 tokens.append(token_str)
-                sorted_logprobs = list(
-                    sorted(
-                        zip(logprobs_token, range(len(logprobs_token))), reverse=True
-                    )
-                )
+                top_k_indices = np.argpartition(logprobs_token, -logprobs)[-logprobs:]
+                top_k_indices = top_k_indices[
+                    np.argsort(logprobs_token[top_k_indices])
+                ][::-1]
                 token_logprobs.append(logprobs_token[int(token)])
                 top_logprob: Optional[Dict[str, float]] = {
-                    self.detokenize([i], prev_tokens=all_tokens[:idx]).decode(
+                    self.detokenize([int(i)], prev_tokens=all_tokens[:idx]).decode(
                         "utf-8", errors="ignore"
-                    ): logprob
-                    for logprob, i in sorted_logprobs[:logprobs]
+                    ): logprobs_token[int(i)]
+                    for i in top_k_indices
                 }
                 top_logprob.update({token_str: logprobs_token[int(token)]})
                 top_logprobs.append(top_logprob)
