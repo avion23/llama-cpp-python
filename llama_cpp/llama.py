@@ -558,10 +558,13 @@ class Llama:
 
         self._sampler = None
 
-        # Cache recurrent/hybrid model detection to avoid repeated FFI calls
+        # Cache model architecture flags to avoid repeated FFI calls
         self._is_recurrent_model = llama_cpp.llama_model_is_recurrent(
             self._model.model
         ) or llama_cpp.llama_model_is_hybrid(self._model.model)
+        self._has_swa_model = llama_cpp.llama_model_n_swa(
+            self._model.model
+        ) > 0
 
     @property
     def ctx(self) -> llama_cpp.llama_context_p:
@@ -592,16 +595,11 @@ class Llama:
 
     @property
     def _is_recurrent(self) -> bool:
-        """Check if model is recurrent (SSM) or hybrid (SSM+Attention).
-
-        These models (Mamba, RWKV, Nemotron, Jamba, etc.) cannot rewind their
-        recurrent state without snapshots. Only strict forward progression or
-        full reset is allowed.
-
-        Returns:
-            True if model has recurrent state that cannot be rewound.
-        """
         return self._is_recurrent_model
+
+    @property
+    def _has_swa(self) -> bool:
+        return self._has_swa_model
 
     def tokenize(
         self, text: bytes, add_bos: bool = True, special: bool = False
@@ -931,6 +929,13 @@ class Llama:
                         "Llama.generate: recurrent model requires full state reset",
                         file=sys.stderr,
                     )
+
+            # SWA/ISWA models (e.g. Gemma-4) have split KV caches whose
+            # position-tracking maps are only cleared by a full reset.
+            # Partial seq_rm leaves stale positions and causes decode failure.
+            if self._has_swa and longest_prefix < self.n_tokens:
+                longest_prefix = 0
+                reset = True
 
             if longest_prefix > 0:
                 if self._ctx.kv_cache_seq_rm(-1, longest_prefix, -1):
